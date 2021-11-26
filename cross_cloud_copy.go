@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		ExitError("Bucket name required\nUsage: %s bucket_name", os.Args[0])
+		ExitError("Bucket name required\nExample: %s s3://bucket_name/data/ oss://bucket_name/data/", os.Args[0])
 	}
 
 	source := os.Args[1]
