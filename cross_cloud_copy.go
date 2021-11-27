@@ -5,19 +5,27 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/zenthangplus/goccm"
 	"io/ioutil"
 	"os"
-	"runtime"
-	"sync"
+	"strconv"
 )
 
+const DefaultMaxConcurrentGoroutines = 5
+
 func main() {
-	if len(os.Args) != 3 {
-		ExitError("Bucket name required\nExample: %s s3://bucket_name/data/ oss://bucket_name/data/", os.Args[0])
+	if len(os.Args) < 3 {
+		ExitError("Arguments incorrect\n"+
+			"Example: %s s3://bucket_name/data/ oss://bucket_name/data/ [maxConcurrent]", os.Args[0])
 	}
 
 	source := os.Args[1]
 	target := os.Args[2]
+	maxConcurrent := DefaultMaxConcurrentGoroutines
+	if len(os.Args) > 3 {
+		maxConcurrent, _ = strconv.Atoi(os.Args[3])
+	}
+	c := goccm.New(maxConcurrent)
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
 
@@ -32,22 +40,23 @@ func main() {
 
 	uploader := GetUploader(dstClient)
 
-	var wg sync.WaitGroup
 	for _, item := range resp.Contents {
-		wg.Add(1)
-		go CopyObject(&wg, srcClient, uploader, *item, srcBucket, desBucket, dstPrefix)
+		c.Wait()
+		obj := item
+		go func() {
+			defer c.Done()
+			CopyObject(srcClient, uploader, obj, srcBucket, desBucket, dstPrefix)
+		}()
 	}
-	wg.Wait()
+	c.WaitAllDone()
 	fmt.Println("Copy finished !")
 }
 
-func CopyObject(wg *sync.WaitGroup, srcClient *s3.S3, uploader *s3manager.Uploader, obj s3.Object,
+func CopyObject(srcClient *s3.S3, uploader *s3manager.Uploader, obj *s3.Object,
 	srcBucket *string, dstBucket *string, dstPrefix *string) {
-	defer wg.Done()
 	//size := *obj.Size
 
 	fmt.Printf("Launching copying of %s\n", *obj.Key)
-	fmt.Printf("Current goroutines %d", runtime.NumGoroutine())
 	objResp, err := srcClient.GetObject(&s3.GetObjectInput{
 		Bucket: srcBucket,
 		Key:    obj.Key,
