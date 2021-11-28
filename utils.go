@@ -7,8 +7,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 func GetStorageInfoFromUrl(url *string) (*string, *string, *string) {
@@ -133,4 +135,20 @@ func GetUploader(dstClient *s3.S3) *s3manager.Uploader {
 func ExitError(msg string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, msg+"\n", args...)
 	os.Exit(1)
+}
+
+func Retry(attempts int, sleep time.Duration,
+	f func(copyMetaInfo *CopyMetaInfo) error,
+	copyMetaIno *CopyMetaInfo) (err error) {
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			log.Println("retrying after error:", err)
+			time.Sleep(sleep)
+		}
+		err = f(copyMetaIno)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
 }
