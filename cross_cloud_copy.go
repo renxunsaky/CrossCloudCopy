@@ -9,21 +9,29 @@ import (
 	"io/ioutil"
 	"os"
 	"strconv"
+	"time"
 )
 
-const DefaultMaxConcurrentGoroutines = 5
+const (
+	DefaultMaxConcurrentGoroutines = 5
+	DefaultMaxRetry                = 5
+)
 
 func main() {
 	if len(os.Args) < 3 {
 		ExitError("Arguments incorrect\n"+
-			"Example: %s s3://bucket_name/data/ oss://bucket_name/data/ [maxConcurrent]", os.Args[0])
+			"Example: %s s3://bucket_name/data/ oss://bucket_name/data/ [maxConcurrent] [maxRetry]", os.Args[0])
 	}
 
 	source := os.Args[1]
 	target := os.Args[2]
 	maxConcurrent := DefaultMaxConcurrentGoroutines
+	maxRetry := DefaultMaxRetry
 	if len(os.Args) > 3 {
 		maxConcurrent, _ = strconv.Atoi(os.Args[3])
+	}
+	if len(os.Args) > 4 {
+		maxRetry, _ = strconv.Atoi(os.Args[4])
 	}
 	c := goccm.New(maxConcurrent)
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
@@ -45,31 +53,38 @@ func main() {
 		obj := item
 		go func() {
 			defer c.Done()
-			CopyObject(srcClient, uploader, obj, srcBucket, desBucket, dstPrefix)
+			copyMetaInfo := &CopyMetaInfo{
+				srcClient, uploader, obj, srcBucket, desBucket, dstPrefix,
+			}
+			copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo)
+			if copyErr != nil {
+				ExitError("Error happened after max retry for %q, %v", *obj.Key, copyErr)
+			}
 		}()
 	}
 	c.WaitAllDone()
 	fmt.Println("Copy finished !")
 }
 
-func CopyObject(srcClient *s3.S3, uploader *s3manager.Uploader, obj *s3.Object,
-	srcBucket *string, dstBucket *string, dstPrefix *string) {
-	//size := *obj.Size
-
-	fmt.Printf("Launching copying of %s\n", *obj.Key)
-	objResp, err := srcClient.GetObject(&s3.GetObjectInput{
-		Bucket: srcBucket,
-		Key:    obj.Key,
+func CopyObject(copyMetaInfo *CopyMetaInfo) error {
+	fmt.Printf("Launching copying of %s\n", *copyMetaInfo.srcObject.Key)
+	objResp, downloadErr := copyMetaInfo.srcClient.GetObject(&s3.GetObjectInput{
+		Bucket: copyMetaInfo.srcBucket,
+		Key:    copyMetaInfo.srcObject.Key,
 	})
-	if err != nil {
-		ExitError("Unable to get object in bucket %q, %v", srcBucket, err)
+	if downloadErr != nil {
+		return fmt.Errorf("unable to get object in bucket %q, %v", *copyMetaInfo.srcBucket, downloadErr)
 	} else {
-		UploadObject(uploader, objResp, dstBucket, GetDstObjectKey(obj.Key, dstPrefix))
+		uploadErr := UploadObject(copyMetaInfo.uploader, objResp, copyMetaInfo.dstBucket,
+			GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.dstPrefix))
+		if uploadErr != nil {
+			fmt.Printf("Finished copying of %s\n", *copyMetaInfo.srcObject.Key)
+		}
+		return uploadErr
 	}
-	fmt.Printf("Finished copying of %s\n", *obj.Key)
 }
 
-func UploadObject(uploader *s3manager.Uploader, objResp *s3.GetObjectOutput, dstBucket *string, dstKey *string) {
+func UploadObject(uploader *s3manager.Uploader, objResp *s3.GetObjectOutput, dstBucket *string, dstKey *string) error {
 	content, _ := ioutil.ReadAll(objResp.Body)
 	uploadOutput, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: dstBucket,
@@ -78,8 +93,9 @@ func UploadObject(uploader *s3manager.Uploader, objResp *s3.GetObjectOutput, dst
 	})
 
 	if err != nil {
-		ExitError("Unable to upload object in bucket %q, %v", *dstBucket, err)
+		return fmt.Errorf("unable to upload object in bucket %q, %v", *dstBucket, err)
 	} else {
 		fmt.Printf("Uploaded %v, ETag is %v\n", uploadOutput.Location, *uploadOutput.ETag)
+		return nil
 	}
 }
