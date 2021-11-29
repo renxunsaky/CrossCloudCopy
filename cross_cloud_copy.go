@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/zenthangplus/goccm"
 	"io/ioutil"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -33,7 +33,6 @@ func main() {
 	if len(os.Args) > 4 {
 		maxRetry, _ = strconv.Atoi(os.Args[4])
 	}
-	c := goccm.New(maxConcurrent)
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
 
@@ -48,11 +47,15 @@ func main() {
 
 	uploader := GetUploader(dstClient)
 
-	for _, item := range resp.Contents {
-		c.Wait()
+	concurrentGoroutines := make(chan int, maxConcurrent)
+	var wg sync.WaitGroup
+
+	for i, item := range resp.Contents {
+		wg.Add(1)
 		obj := item
-		go func() {
-			defer c.Done()
+		go func(i int) {
+			defer wg.Done()
+			concurrentGoroutines <- i
 			copyMetaInfo := &CopyMetaInfo{
 				srcClient, uploader, obj, srcBucket, desBucket, dstPrefix,
 			}
@@ -60,9 +63,10 @@ func main() {
 			if copyErr != nil {
 				ExitError("Error happened after max retry for %q, %v", *obj.Key, copyErr)
 			}
-		}()
+			<-concurrentGoroutines
+		}(i)
 	}
-	c.WaitAllDone()
+	wg.Wait()
 	fmt.Println("Copy finished !")
 }
 
