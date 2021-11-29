@@ -88,7 +88,7 @@ func GetOSSClient() *s3.S3 {
 func GetGSClient() *s3.S3 {
 	gsEndPoint, present := os.LookupEnv("GCP_OSS_END_POINT")
 	if !present {
-		gsEndPoint = "oss-accelerate.aliyuncs.com"
+		gsEndPoint = "storage.googleapis.com"
 	}
 	profile, profilePresent := os.LookupEnv("GCP_PROFILE")
 	var sess *session.Session
