@@ -45,8 +45,6 @@ func main() {
 		ExitError("Unable to list items in bucket %q, %v", srcBucket, err)
 	}
 
-	uploader := GetUploader(dstClient)
-
 	concurrentGoroutines := make(chan int, maxConcurrent)
 	var wg sync.WaitGroup
 
@@ -57,7 +55,8 @@ func main() {
 			defer wg.Done()
 			concurrentGoroutines <- i
 			copyMetaInfo := &CopyMetaInfo{
-				srcClient, uploader, obj, srcBucket, desBucket, dstPrefix,
+				srcClient, NewUploader(dstClient, obj),
+				obj, srcBucket, desBucket, dstPrefix,
 			}
 			copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo)
 			if copyErr != nil {

@@ -8,9 +8,15 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"time"
+)
+
+const (
+	DefaultPartSizeByte       = 10 * 1024 * 1024
+	MaxConcurrencyMultiUpload = 20
 )
 
 func GetStorageInfoFromUrl(url *string) (*string, *string, *string) {
@@ -124,10 +130,12 @@ func GetDstObjectKey(srcKey *string, dstPrefix *string) *string {
 	}
 }
 
-func GetUploader(dstClient *s3.S3) *s3manager.Uploader {
+func NewUploader(dstClient *s3.S3, obj *s3.Object) *s3manager.Uploader {
+	size := obj.Size
+	threadNb := math.Min(math.Ceil(float64(*size/DefaultPartSizeByte)), MaxConcurrencyMultiUpload)
 	uploader := s3manager.NewUploaderWithClient(dstClient, func(u *s3manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024 // 10MB per part
-		u.Concurrency = 20
+		u.Concurrency = int(threadNb)
 	})
 	return uploader
 }
