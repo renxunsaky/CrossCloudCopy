@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	DefaultPartSizeByte       = 10 * 1024 * 1024
+	DefaultPartSizeByte       = int64(10 * 1024 * 1024)
 	MaxConcurrencyMultiUpload = 20
 )
 
@@ -131,13 +131,21 @@ func GetDstObjectKey(srcKey *string, dstPrefix *string) *string {
 }
 
 func NewUploader(dstClient *s3.S3, obj *s3.Object) *s3manager.Uploader {
-	size := obj.Size
-	threadNb := math.Min(math.Ceil(float64(*size/DefaultPartSizeByte)), MaxConcurrencyMultiUpload)
-	uploader := s3manager.NewUploaderWithClient(dstClient, func(u *s3manager.Uploader) {
-		u.PartSize = 10 * 1024 * 1024 // 10MB per part
-		u.Concurrency = int(threadNb)
+	return s3manager.NewUploaderWithClient(dstClient, func(u *s3manager.Uploader) {
+		u.PartSize = DefaultPartSizeByte
+		u.Concurrency = CalculateThreadNumber(obj.Size)
 	})
-	return uploader
+}
+
+func NewDownloader(srcClient *s3.S3, obj *s3.Object) *s3manager.Downloader {
+	return s3manager.NewDownloaderWithClient(srcClient, func(d *s3manager.Downloader) {
+		d.PartSize = DefaultPartSizeByte
+		d.Concurrency = CalculateThreadNumber(obj.Size)
+	})
+}
+
+func CalculateThreadNumber(size *int64) int {
+	return int(math.Min(math.Ceil(float64(*size/DefaultPartSizeByte)), MaxConcurrencyMultiUpload))
 }
 
 func ExitError(msg string, args ...interface{}) {
@@ -160,3 +168,19 @@ func Retry(attempts int, sleep time.Duration,
 	}
 	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
 }
+
+func CalculatePartNumber(objectSize *int64) int64 {
+	if *objectSize > 0 {
+		return int64(math.Ceil(float64(*objectSize) / float64(DefaultPartSizeByte)))
+	} else {
+		return 1
+	}
+}
+
+// completedParts is a wrapper to make parts sortable by their part number,
+// since S3 required this list to be sent in sorted order.
+type completedParts []*s3.CompletedPart
+
+func (a completedParts) Len() int           { return len(a) }
+func (a completedParts) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a completedParts) Less(i, j int) bool { return *a[i].PartNumber < *a[j].PartNumber }
