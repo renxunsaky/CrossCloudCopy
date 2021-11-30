@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/base64"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -175,6 +177,11 @@ func CalculatePartNumber(objectSize *int64) int64 {
 	} else {
 		return 1
 	}
+}
+
+func base64Sum(content []byte) string {
+	sum := md5.Sum(content)
+	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
 // completedParts is a wrapper to make parts sortable by their part number,

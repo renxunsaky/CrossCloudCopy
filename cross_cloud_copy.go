@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"io/ioutil"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -93,10 +94,12 @@ func LaunchSimpleUpload(copyMetaInfo *CopyMetaInfo) error {
 		return getObjectErr
 	}
 	content, _ := ioutil.ReadAll(objectOutput.Body)
+	md5Sum := base64Sum(content)
 	_, putObjectErr := copyMetaInfo.dstClient.PutObject(&s3.PutObjectInput{
-		Bucket: copyMetaInfo.dstBucket,
-		Key:    dstKey,
-		Body:   bytes.NewReader(content),
+		Bucket:     copyMetaInfo.dstBucket,
+		Key:        dstKey,
+		Body:       bytes.NewReader(content),
+		ContentMD5: &md5Sum,
 	})
 	if putObjectErr != nil {
 		return putObjectErr
@@ -128,6 +131,8 @@ func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo) error {
 			defer wg.Done()
 			part, err := ReadFromSourceAndWriteToDestination(copyMetaInfo, uploadOutput.UploadId, &partNumber, startBytes, endBytes)
 			if err != nil {
+				log.Println(err)
+				fmt.Printf("Error happened during coping part %d of %s. Abording multipart\n", partNumber, *dstKey)
 				_, _ = copyMetaInfo.dstClient.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
 					UploadId: uploadOutput.UploadId,
 					Bucket:   copyMetaInfo.dstBucket,
@@ -162,12 +167,14 @@ func ReadFromSourceAndWriteToDestination(copyMetaInfo *CopyMetaInfo, uploadId *s
 		return nil, err
 	} else {
 		content, _ := ioutil.ReadAll(objOutPutRes.Body)
+		md5Sum := base64Sum(content)
 		uploadPartOutput, uploadPartErr := copyMetaInfo.dstClient.UploadPart(&s3.UploadPartInput{
 			UploadId:   uploadId,
 			PartNumber: partNumber,
 			Bucket:     copyMetaInfo.dstBucket,
 			Key:        GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.dstPrefix),
 			Body:       bytes.NewReader(content),
+			ContentMD5: &md5Sum,
 		})
 		if uploadPartErr != nil {
 			return nil, uploadPartErr
