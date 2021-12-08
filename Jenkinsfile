@@ -59,7 +59,7 @@ pipeline {
                         [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "datalake-infra-aws-$ENV-account"]
                     ]) {
                         ansiColor('xterm') {
-                            docker.build("${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/datalake/datalake/infra/c3:${VERSION}", "-f Dockerfile .")
+                            docker.build("${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/datalake/infra/c3:${VERSION}", "-f Dockerfile .")
                         }
                     }
                 }
@@ -71,7 +71,7 @@ pipeline {
                     // Push the Docker image to ECR
                     docker.withRegistry(ECRURL, ECRCRED) {
                         ansiColor('xterm') {
-                            docker.image("${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/datalake/${function}:${VERSION}").push()
+                            docker.image("${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/datalake/infra/c3:${VERSION}").push()
                         }
                     }//end docker.withRegistry
                 }//end script
