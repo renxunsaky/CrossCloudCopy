@@ -25,20 +25,18 @@ pipeline {
                 script {
                     if (ENV == "dev") {
                         ACCOUNT_ID = "338427658904"
-                        ECRURL = "https://${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
-                        ECRCRED = "ecr:${REGION}:datalake-infra-aws-${ENV}-account"
                     } else {
                         ACCOUNT_ID = "806624607236"
-                        ECRURL = "https://${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
-                        ECRCRED = "ecr:${REGION}:datalake-infra-aws-${ENV}-account"
                     }
+                    ECRURL = "https://${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+                    ECRCRED = "ecr:${REGION}:datalake-${ENV}-user-jenkins-infra"
                 }
             }
         }
         stage('Create ECR Repository if not exist') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                                  credentialsId: "datalake-infra-aws-$ENV-account"]]) {
+                                  credentialsId: "datalake-$ENV-user-jenkins-infra"]]) {
                     ansiColor('xterm') {
                         script {
                             sh """
@@ -56,7 +54,7 @@ pipeline {
             steps {
                 script  {
                     withCredentials([
-                        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "datalake-infra-aws-$ENV-account"]
+                        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "datalake-$ENV-user-jenkins-infra"]
                     ]) {
                         ansiColor('xterm') {
                             docker.build("${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/datalake/infra/c3:${VERSION}", "-f Dockerfile .")
