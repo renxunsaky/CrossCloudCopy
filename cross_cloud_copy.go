@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +17,7 @@ import (
 const (
 	DefaultMaxConcurrentGoroutines = 5
 	DefaultMaxRetry                = 5
+	DefaultAddSuccessFile          = false
 )
 
 func main() {
@@ -28,11 +30,15 @@ func main() {
 	target := os.Args[2]
 	maxConcurrent := DefaultMaxConcurrentGoroutines
 	maxRetry := DefaultMaxRetry
+	isAddSuccessFile := DefaultAddSuccessFile
 	if len(os.Args) > 3 {
 		maxConcurrent, _ = strconv.Atoi(os.Args[3])
 	}
 	if len(os.Args) > 4 {
 		maxRetry, _ = strconv.Atoi(os.Args[4])
+	}
+	if len(os.Args) > 5 {
+		isAddSuccessFile, _ = strconv.ParseBool(os.Args[5])
 	}
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
@@ -45,6 +51,20 @@ func main() {
 	})
 	if err != nil {
 		ExitError("Unable to list items in bucket %q, %v", srcBucket, err)
+	}
+
+	sourceSuccessFilePrefix := *srcPrefix + "_SUCCESS"
+	_, headObjectOutputErr := srcClient.HeadObject(&s3.HeadObjectInput{
+		Bucket: srcBucket,
+		Key:    &sourceSuccessFilePrefix,
+	})
+
+	var sourceHasSuccessFile = false
+	if headObjectOutputErr != nil {
+		println("source bucket doesn't have the _SUCCESS file")
+		println(headObjectOutputErr.Error())
+	} else {
+		sourceHasSuccessFile = true
 	}
 
 	concurrentGoroutines := make(chan int, maxConcurrent)
@@ -73,6 +93,18 @@ func main() {
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 	fmt.Printf("Copy process finished ! Used total time: %.2f minutes\n", duration.Minutes())
+	if isAddSuccessFile || sourceHasSuccessFile {
+		var emptyContent []byte
+		successFilePrefix := *dstPrefix + "_SUCCESS"
+		_, err := dstClient.PutObject(&s3.PutObjectInput{
+			Bucket: desBucket,
+			Key:    &successFilePrefix,
+			Body:   bytes.NewReader(emptyContent),
+		})
+		if err != nil {
+			fmt.Printf("Error while adding _SUCCESS file")
+		}
+	}
 }
 
 func CopyObject(copyMetaInfo *CopyMetaInfo) error {
@@ -80,7 +112,12 @@ func CopyObject(copyMetaInfo *CopyMetaInfo) error {
 	if *copyMetaInfo.srcObject.Size > DefaultPartSizeByte {
 		return LaunchMultiPartUpload(copyMetaInfo)
 	} else {
-		return LaunchSimpleUpload(copyMetaInfo)
+		if strings.HasSuffix(*copyMetaInfo.srcObject.Key, "_SUCCESS") {
+			println("Ignore copying _SUCCESS here and will put it later")
+			return nil
+		} else {
+			return LaunchSimpleUpload(copyMetaInfo)
+		}
 	}
 }
 
