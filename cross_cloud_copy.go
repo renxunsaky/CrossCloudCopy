@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"io/ioutil"
@@ -183,13 +184,36 @@ func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo) error {
 	}
 	wg.Wait()
 	sort.Sort(parts)
-	_, completeMultipartUploadErr := copyMetaInfo.dstClient.CompleteMultipartUpload(&s3.CompleteMultipartUploadInput{
+	completeMultipartUploadRes, completeMultipartUploadErr := copyMetaInfo.dstClient.CompleteMultipartUpload(&s3.CompleteMultipartUploadInput{
 		Bucket:          copyMetaInfo.dstBucket,
 		Key:             dstKey,
 		UploadId:        uploadOutput.UploadId,
 		MultipartUpload: &s3.CompletedMultipartUpload{Parts: parts},
 	})
-	return completeMultipartUploadErr
+
+	if completeMultipartUploadErr == nil {
+		fmt.Printf("Completed multiupload for %s, now checking data integrity... \n", *dstKey)
+		HeadObjectOutput, HeadObjectErr := copyMetaInfo.dstClient.HeadObject(&s3.HeadObjectInput{
+			Bucket: completeMultipartUploadRes.Bucket,
+			Key:    completeMultipartUploadRes.Key,
+		})
+		if HeadObjectErr != nil {
+			log.Println(HeadObjectErr)
+			return HeadObjectErr
+		} else {
+			if *HeadObjectOutput.ContentLength != *copyMetaInfo.srcObject.Size {
+				fmt.Printf("source object(%s) size(%d) different than destination object size(%d)",
+					*copyMetaInfo.srcObject.Key, *copyMetaInfo.srcObject.Size, *HeadObjectOutput.ContentLength)
+				return errors.New("source object size different than destination object size")
+			} else {
+				fmt.Printf("Data integrity checked for %s, it's OK with length of %d",
+					*completeMultipartUploadRes.Key, *HeadObjectOutput.ContentLength)
+				return nil
+			}
+		}
+	} else {
+		return completeMultipartUploadErr
+	}
 }
 
 func ReadFromSourceAndWriteToDestination(copyMetaInfo *CopyMetaInfo, uploadId *string,
@@ -205,6 +229,8 @@ func ReadFromSourceAndWriteToDestination(copyMetaInfo *CopyMetaInfo, uploadId *s
 	} else {
 		content, _ := ioutil.ReadAll(objOutPutRes.Body)
 		md5Sum := base64Sum(content)
+		fmt.Printf("uploading object [%s] with [partNum]: %d, [uploadID]: %s, [MD5]: %s \n",
+			*copyMetaInfo.srcObject.Key, partNumber, *uploadId, md5Sum)
 		uploadPartOutput, uploadPartErr := copyMetaInfo.dstClient.UploadPart(&s3.UploadPartInput{
 			UploadId:   uploadId,
 			PartNumber: partNumber,
@@ -217,6 +243,8 @@ func ReadFromSourceAndWriteToDestination(copyMetaInfo *CopyMetaInfo, uploadId *s
 			return nil, uploadPartErr
 		} else {
 			part := &s3.CompletedPart{ETag: uploadPartOutput.ETag, PartNumber: partNumber}
+			fmt.Printf("uploaded object [%s] for [partNum]: %d with [uploadID]: %s, [ETag]: %s \n",
+				*copyMetaInfo.srcObject.Key, *part.PartNumber, *uploadId, *part.ETag)
 			return part, nil
 		}
 	}
