@@ -202,11 +202,11 @@ func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo) error {
 			return HeadObjectErr
 		} else {
 			if *HeadObjectOutput.ContentLength != *copyMetaInfo.srcObject.Size {
-				fmt.Printf("source object(%s) size(%d) different than destination object size(%d)",
+				fmt.Printf("source object(%s) size(%d) different than destination object size(%d) \n",
 					*copyMetaInfo.srcObject.Key, *copyMetaInfo.srcObject.Size, *HeadObjectOutput.ContentLength)
 				return errors.New("source object size different than destination object size")
 			} else {
-				fmt.Printf("Data integrity checked for %s, it's OK with length of %d",
+				fmt.Printf("Data integrity checked for %s, it's OK with length of %d \n",
 					*completeMultipartUploadRes.Key, *HeadObjectOutput.ContentLength)
 				return nil
 			}
