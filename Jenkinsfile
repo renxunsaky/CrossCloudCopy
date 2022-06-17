@@ -1,5 +1,5 @@
 def getEnvFromBranch(branch) {
-  if (branch == 'master') {
+  if (branch == 'main') {
     return 'prod'
   } else {
     return 'dev'
