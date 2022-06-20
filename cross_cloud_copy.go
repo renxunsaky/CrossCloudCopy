@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"io/ioutil"
 	"log"
@@ -46,14 +47,6 @@ func main() {
 
 	startTime := time.Now()
 	// Get the list of items from source
-	resp, err := srcClient.ListObjectsV2(&s3.ListObjectsV2Input{
-		Bucket: srcBucket,
-		Prefix: srcPrefix,
-	})
-	if err != nil {
-		ExitError("Unable to list items in bucket %q, %v", srcBucket, err)
-	}
-
 	sourceSuccessFilePrefix := *srcPrefix + "_SUCCESS"
 	_, headObjectOutputErr := srcClient.HeadObject(&s3.HeadObjectInput{
 		Bucket: srcBucket,
@@ -68,29 +61,45 @@ func main() {
 		sourceHasSuccessFile = true
 	}
 
-	concurrentGoroutines := make(chan int, maxConcurrent)
-	var wg sync.WaitGroup
+	var continuationToken *string
+	for {
+		resp, err := srcClient.ListObjectsV2(&s3.ListObjectsV2Input{
+			Bucket:  srcBucket,
+			Prefix:  srcPrefix,
+			ContinuationToken: continuationToken,
+		})
+		if err != nil {
+			ExitError("Unable to list items in bucket %q, %v", srcBucket, err)
+		}
 
-	for i, item := range resp.Contents {
-		wg.Add(1)
-		obj := item
-		go func(i int) {
-			defer wg.Done()
-			concurrentGoroutines <- i
-			copyMetaInfo := &CopyMetaInfo{
-				srcClient, dstClient,
-				obj, srcBucket, desBucket, dstPrefix,
-			}
-			copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo)
-			if copyErr != nil {
-				ExitError("Error happened after max retry for %q, %v", *obj.Key, copyErr)
-			} else {
-				fmt.Printf("Copied %s with success\n", *obj.Key)
-			}
-			<-concurrentGoroutines
-		}(i)
+		concurrentGoroutines := make(chan int, maxConcurrent)
+		var wg sync.WaitGroup
+		for i, item := range resp.Contents {
+			wg.Add(1)
+			obj := item
+			go func(i int) {
+				defer wg.Done()
+				concurrentGoroutines <- i
+				copyMetaInfo := &CopyMetaInfo{
+					srcClient, dstClient,
+					obj, srcBucket, desBucket, dstPrefix,
+				}
+				copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo)
+				if copyErr != nil {
+					ExitError("Error happened after max retry for %q, %v", *obj.Key, copyErr)
+				} else {
+					fmt.Printf("Copied %s with success\n", *obj.Key)
+				}
+				<-concurrentGoroutines
+			}(i)
+		}
+		wg.Wait()
+
+		if !aws.BoolValue(resp.IsTruncated) {
+			break
+		}
+		continuationToken = resp.NextContinuationToken
 	}
-	wg.Wait()
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 	fmt.Printf("Copy process finished ! Used total time: %.2f minutes\n", duration.Minutes())
