@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "container/list"
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -144,6 +146,24 @@ func NewDownloader(srcClient *s3.S3, obj *s3.Object) *s3manager.Downloader {
 		d.PartSize = DefaultPartSizeByte
 		d.Concurrency = CalculateThreadNumber(obj.Size)
 	})
+}
+
+func ReadDeltaLakeManifestFile(srcClient *s3.S3, srcBucket *string, srcPrefix *string) (string, error) {
+	manifestSuffix := *srcPrefix + "/_symlink_format_manifest/manifest"
+	result, err := srcClient.GetObject(&s3.GetObjectInput{
+		Bucket: srcBucket,
+		Key:    &manifestSuffix,
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("error getting Deltalake manifest file: %s", err)
+	}
+
+	body, readBodyErr := ioutil.ReadAll(result.Body)
+	if readBodyErr != nil {
+		return "", fmt.Errorf("error reading Deltalake manifest file body: %s", readBodyErr)
+	}
+	return string(body), nil
 }
 
 func CalculateThreadNumber(size *int64) int {
