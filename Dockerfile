@@ -22,4 +22,5 @@ WORKDIR /
 
 COPY --from=build /app/C3 /usr/bin/
 
+EXPOSE 9000
 ENTRYPOINT ["/usr/bin/C3"]

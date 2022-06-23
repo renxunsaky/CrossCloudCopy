@@ -4,44 +4,65 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
 	"io/ioutil"
 	"log"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-)
 
-const (
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/s3"
+    "github.com/gin-gonic/gin"
+)
+const(
 	DefaultMaxConcurrentGoroutines = 5
 	DefaultMaxRetry                = 5
-	DefaultAddSuccessFile          = false
 )
 
-func main() {
-	if len(os.Args) < 3 {
-		ExitError("Arguments incorrect\n"+
-			"Example: %s s3://bucket_name/data/ oss://bucket_name/data/ [maxConcurrent] [maxRetry]", os.Args[0])
-	}
+type SourceTarget struct {
+    Source string
+    Target string
+    MaxConcurrent int
+    MaxRetry int
+    IsAddSuccessFile bool
+}
 
-	source := os.Args[1]
-	target := os.Args[2]
-	maxConcurrent := DefaultMaxConcurrentGoroutines
-	maxRetry := DefaultMaxRetry
-	isAddSuccessFile := DefaultAddSuccessFile
-	if len(os.Args) > 3 {
-		maxConcurrent, _ = strconv.Atoi(os.Args[3])
+func main() {
+    router := gin.Default()
+
+    // FC HTTP trigger
+    router.GET("/", copySrcToDest)
+
+    // FC Event trigger
+    //router.POST("/invoke", fcEventInvoke)
+
+    // listen and serve on port 9000
+    router.Run(":9000")
+    //ExitError("Arguments incorrect\n"+
+    //"Example: %s s3://bucket_name/data/ oss://bucket_name/data/ [maxConcurrent] [maxRetry]", os.Args[0])
+}
+
+func copySrcToDest(context *gin.Context) {
+    requestBody := SourceTarget{
+		MaxConcurrent: DefaultMaxConcurrentGoroutines,
+		MaxRetry: DefaultMaxRetry,
 	}
-	if len(os.Args) > 4 {
-		maxRetry, _ = strconv.Atoi(os.Args[4])
-	}
-	if len(os.Args) > 5 {
-		isAddSuccessFile, _ = strconv.ParseBool(os.Args[5])
-	}
+    if err := context.BindJSON(&requestBody); err != nil {
+        fmt.Printf("Error parsing input into JSON due to %+v", err)
+        os.Exit(1)
+    }
+    source := requestBody.Source
+    target := requestBody.Target
+    if "" == source || "" == target {
+        fmt.Printf("Source and target are mandatory, but given <%s> and <%s>", source, target)
+        os.Exit(1)
+    }
+	maxConcurrent := requestBody.MaxConcurrent
+	maxRetry := requestBody.MaxRetry
+	isAddSuccessFile := requestBody.IsAddSuccessFile
+
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
 
