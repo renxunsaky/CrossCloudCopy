@@ -20,6 +20,7 @@ const (
 	DefaultMaxConcurrentGoroutines = 5
 	DefaultMaxRetry                = 5
 	DefaultAddSuccessFile          = false
+	DefaultIsDeltaLake             = false
 )
 
 func main() {
@@ -33,6 +34,7 @@ func main() {
 	maxConcurrent := DefaultMaxConcurrentGoroutines
 	maxRetry := DefaultMaxRetry
 	isAddSuccessFile := DefaultAddSuccessFile
+	isDeltaLake := DefaultIsDeltaLake
 	if len(os.Args) > 3 {
 		maxConcurrent, _ = strconv.Atoi(os.Args[3])
 	}
@@ -41,6 +43,9 @@ func main() {
 	}
 	if len(os.Args) > 5 {
 		isAddSuccessFile, _ = strconv.ParseBool(os.Args[5])
+	}
+	if len(os.Args) > 6 {
+		isDeltaLake, _ = strconv.ParseBool(os.Args[6])
 	}
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
@@ -61,6 +66,15 @@ func main() {
 		sourceHasSuccessFile = true
 	}
 
+	fileContent := ""
+	if isDeltaLake {
+		var manifestErr error
+		fileContent, manifestErr = ReadDeltaLakeManifestFile(srcClient, srcBucket, srcPrefix)
+		if manifestErr != nil {
+			ExitError("Error while reading DeltaLake manifest file", manifestErr)
+		}
+	}
+
 	var continuationToken *string
 	for {
 		resp, err := srcClient.ListObjectsV2(&s3.ListObjectsV2Input{
@@ -75,6 +89,10 @@ func main() {
 		concurrentGoroutines := make(chan int, maxConcurrent)
 		var wg sync.WaitGroup
 		for i, item := range resp.Contents {
+			if isDeltaLake && !strings.Contains(fileContent, *item.Key) {
+				log.Printf("file %s not in DeltaLake manifest file, to be ignored\n", *item.Key)
+				continue
+			}
 			wg.Add(1)
 			obj := item
 			go func(i int) {
