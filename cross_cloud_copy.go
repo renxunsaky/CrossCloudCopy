@@ -51,6 +51,11 @@ func main() {
 	if len(os.Args) > 7 {
 		multiPartUploadThreshold, _ = strconv.ParseInt(os.Args[7], 10, 64)
 	}
+	protocol, _, _ := GetStorageInfoFromUrl(&target)
+	if "gs" == *protocol {
+		multiPartUploadThreshold = int64(10240 * 1024 * 1024)
+	}
+
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
 
@@ -82,8 +87,8 @@ func main() {
 	var continuationToken *string
 	for {
 		resp, err := srcClient.ListObjectsV2(&s3.ListObjectsV2Input{
-			Bucket:  srcBucket,
-			Prefix:  srcPrefix,
+			Bucket:            srcBucket,
+			Prefix:            srcPrefix,
 			ContinuationToken: continuationToken,
 		})
 		if err != nil {
