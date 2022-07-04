@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io/ioutil"
 	"log"
 	"math"
@@ -20,7 +19,6 @@ import (
 
 const (
 	DefaultPartSizeByte       = int64(10 * 1024 * 1024)
-	MaxConcurrencyMultiUpload = 20
 )
 
 func GetStorageInfoFromUrl(url *string) (*string, *string, *string) {
@@ -134,20 +132,6 @@ func GetDstObjectKey(srcKey *string, dstPrefix *string) *string {
 	}
 }
 
-func NewUploader(dstClient *s3.S3, obj *s3.Object) *s3manager.Uploader {
-	return s3manager.NewUploaderWithClient(dstClient, func(u *s3manager.Uploader) {
-		u.PartSize = DefaultPartSizeByte
-		u.Concurrency = CalculateThreadNumber(obj.Size)
-	})
-}
-
-func NewDownloader(srcClient *s3.S3, obj *s3.Object) *s3manager.Downloader {
-	return s3manager.NewDownloaderWithClient(srcClient, func(d *s3manager.Downloader) {
-		d.PartSize = DefaultPartSizeByte
-		d.Concurrency = CalculateThreadNumber(obj.Size)
-	})
-}
-
 func ReadDeltaLakeManifestFile(srcClient *s3.S3, srcBucket *string, srcPrefix *string) (string, error) {
 	manifestSuffix := *srcPrefix + "/_symlink_format_manifest/manifest"
 	result, err := srcClient.GetObject(&s3.GetObjectInput{
@@ -166,24 +150,20 @@ func ReadDeltaLakeManifestFile(srcClient *s3.S3, srcBucket *string, srcPrefix *s
 	return string(body), nil
 }
 
-func CalculateThreadNumber(size *int64) int {
-	return int(math.Min(math.Ceil(float64(*size/DefaultPartSizeByte)), MaxConcurrencyMultiUpload))
-}
-
 func ExitError(msg string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, msg+"\n", args...)
 	os.Exit(1)
 }
 
 func Retry(attempts int, sleep time.Duration,
-	f func(copyMetaInfo *CopyMetaInfo) error,
-	copyMetaIno *CopyMetaInfo) (err error) {
+	f func(copyMetaInfo *CopyMetaInfo, multiPartUploadThreshold *int64) error,
+	copyMetaIno *CopyMetaInfo, multiPartUploadThreshold *int64) (err error) {
 	for i := 0; i < attempts; i++ {
 		if i > 0 {
 			log.Println("retrying after error:", err)
 			time.Sleep(sleep)
 		}
-		err = f(copyMetaIno)
+		err = f(copyMetaIno, multiPartUploadThreshold)
 		if err == nil {
 			return nil
 		}
@@ -191,9 +171,9 @@ func Retry(attempts int, sleep time.Duration,
 	return fmt.Errorf("after %d attempts, last error: %s", attempts, err)
 }
 
-func CalculatePartNumber(objectSize *int64) int64 {
+func CalculatePartNumber(objectSize *int64, multiPartUploadThreshold *int64) int64 {
 	if *objectSize > 0 {
-		return int64(math.Ceil(float64(*objectSize) / float64(DefaultPartSizeByte)))
+		return int64(math.Ceil(float64(*objectSize) / float64(*multiPartUploadThreshold)))
 	} else {
 		return 1
 	}
