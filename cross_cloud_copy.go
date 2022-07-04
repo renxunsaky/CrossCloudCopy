@@ -35,6 +35,7 @@ func main() {
 	maxRetry := DefaultMaxRetry
 	isAddSuccessFile := DefaultAddSuccessFile
 	isDeltaLake := DefaultIsDeltaLake
+	multiPartUploadThreshold := DefaultPartSizeByte
 	if len(os.Args) > 3 {
 		maxConcurrent, _ = strconv.Atoi(os.Args[3])
 	}
@@ -46,6 +47,9 @@ func main() {
 	}
 	if len(os.Args) > 6 {
 		isDeltaLake, _ = strconv.ParseBool(os.Args[6])
+	}
+	if len(os.Args) > 7 {
+		multiPartUploadThreshold, _ = strconv.ParseInt(os.Args[7], 10, 64)
 	}
 	srcClient, srcBucket, srcPrefix := GetStorageClientAndBucketInfo(&source)
 	dstClient, desBucket, dstPrefix := GetStorageClientAndBucketInfo(&target)
@@ -102,7 +106,7 @@ func main() {
 					srcClient, dstClient,
 					obj, srcBucket, desBucket, dstPrefix,
 				}
-				copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo)
+				copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo, &multiPartUploadThreshold)
 				if copyErr != nil {
 					ExitError("Error happened after max retry for %q, %v", *obj.Key, copyErr)
 				} else {
@@ -135,10 +139,10 @@ func main() {
 	}
 }
 
-func CopyObject(copyMetaInfo *CopyMetaInfo) error {
+func CopyObject(copyMetaInfo *CopyMetaInfo, multiPartUploadThreshold *int64) error {
 	fmt.Printf("Launching copying of %s\n", *copyMetaInfo.srcObject.Key)
-	if *copyMetaInfo.srcObject.Size > DefaultPartSizeByte {
-		return LaunchMultiPartUpload(copyMetaInfo)
+	if *copyMetaInfo.srcObject.Size > *multiPartUploadThreshold {
+		return LaunchMultiPartUpload(copyMetaInfo, multiPartUploadThreshold)
 	} else {
 		if strings.HasSuffix(*copyMetaInfo.srcObject.Key, "_SUCCESS") {
 			println("Ignore copying _SUCCESS here and will put it later")
@@ -174,8 +178,8 @@ func LaunchSimpleUpload(copyMetaInfo *CopyMetaInfo) error {
 	}
 }
 
-func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo) error {
-	totalPartNumber := CalculatePartNumber(copyMetaInfo.srcObject.Size)
+func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo, multiPartUploadThreshold *int64) error {
+	totalPartNumber := CalculatePartNumber(copyMetaInfo.srcObject.Size, multiPartUploadThreshold)
 	dstKey := GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.dstPrefix)
 	uploadOutput, createMultipartUploadErr := copyMetaInfo.dstClient.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
 		Bucket: copyMetaInfo.dstBucket,
@@ -190,8 +194,8 @@ func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo) error {
 	for i := int64(1); i < totalPartNumber+1; i++ {
 		wg.Add(1)
 		partNumber := i
-		startBytes := (partNumber - 1) * DefaultPartSizeByte
-		endBytes := startBytes + DefaultPartSizeByte - 1
+		startBytes := (partNumber - 1) * (*multiPartUploadThreshold)
+		endBytes := startBytes + (*multiPartUploadThreshold) - 1
 		go func() {
 			defer wg.Done()
 			part, err := ReadFromSourceAndWriteToDestination(copyMetaInfo, uploadOutput.UploadId, &partNumber, startBytes, endBytes)
