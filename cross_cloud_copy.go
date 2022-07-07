@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"log"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,34 +23,46 @@ const (
 	DefaultIsDeltaLake             = false
 )
 
-func main() {
-	if len(os.Args) < 3 {
-		ExitError("Arguments incorrect\n"+
-			"Example: %s s3://bucket_name/data/ oss://bucket_name/data/ [maxConcurrent] [maxRetry]", os.Args[0])
-	}
+type SourceTarget struct {
+	Source string
+	Target string
+	MaxConcurrent int
+	MaxRetry int
+	IsAddSuccessFile bool
+	IsDeltaLake bool
+	DefaultPartSizeByte int64
+}
 
-	source := os.Args[1]
-	target := os.Args[2]
-	maxConcurrent := DefaultMaxConcurrentGoroutines
-	maxRetry := DefaultMaxRetry
-	isAddSuccessFile := DefaultAddSuccessFile
-	isDeltaLake := DefaultIsDeltaLake
-	multiPartUploadThreshold := DefaultPartSizeByte
-	if len(os.Args) > 3 {
-		maxConcurrent, _ = strconv.Atoi(os.Args[3])
+func main() {
+	router := gin.Default()
+	router.POST("/invoke", copyPreparation)
+	router.Run(":9000")
+}
+
+func copyPreparation(context *gin.Context) {
+	requestBody := SourceTarget{
+		MaxConcurrent: DefaultMaxConcurrentGoroutines,
+		MaxRetry: DefaultMaxRetry,
+		IsAddSuccessFile: DefaultAddSuccessFile,
+		IsDeltaLake: DefaultIsDeltaLake,
+		DefaultPartSizeByte: DefaultPartSizeByte,
 	}
-	if len(os.Args) > 4 {
-		maxRetry, _ = strconv.Atoi(os.Args[4])
+	if err := context.BindJSON(&requestBody); err != nil {
+		fmt.Printf("Error parsing input into JSON due to %+v", err)
+		os.Exit(1)
 	}
-	if len(os.Args) > 5 {
-		isAddSuccessFile, _ = strconv.ParseBool(os.Args[5])
+	source := requestBody.Source
+	target := requestBody.Target
+	if "" == source || "" == target {
+		fmt.Printf("Source and target are mandatory, but given <%s> and <%s>", source, target)
+		os.Exit(1)
 	}
-	if len(os.Args) > 6 {
-		isDeltaLake, _ = strconv.ParseBool(os.Args[6])
-	}
-	if len(os.Args) > 7 {
-		multiPartUploadThreshold, _ = strconv.ParseInt(os.Args[7], 10, 64)
-	}
+	maxConcurrent := requestBody.MaxConcurrent
+	maxRetry := requestBody.MaxRetry
+	isAddSuccessFile := requestBody.IsAddSuccessFile
+	isDeltaLake := requestBody.IsDeltaLake
+	multiPartUploadThreshold := requestBody.DefaultPartSizeByte
+
 	protocol, _, _ := GetStorageInfoFromUrl(&target)
 	if "gs" == *protocol {
 		multiPartUploadThreshold = int64(10240 * 1024 * 1024)
