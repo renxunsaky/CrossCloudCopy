@@ -10,5 +10,6 @@ type CopyMetaInfo struct {
 	srcObject *s3.Object
 	srcBucket *string
 	dstBucket *string
+	srcPrefix *string
 	dstPrefix *string
 }

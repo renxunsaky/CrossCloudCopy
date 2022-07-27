@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	DefaultPartSizeByte       = int64(10 * 1024 * 1024)
+	DefaultPartSizeByte = int64(10 * 1024 * 1024)
 )
 
 func GetStorageInfoFromUrl(url *string) (*string, *string, *string) {
@@ -121,11 +121,18 @@ func GetStorageClient(session *session.Session) *s3.S3 {
 	return s3.New(session)
 }
 
-func GetDstObjectKey(srcKey *string, dstPrefix *string) *string {
+func GetDstObjectKey(srcKey *string, srcPrefix *string, dstPrefix *string) *string {
 	var finalKey string
+	var dstSuffix string
+
 	if strings.HasSuffix(*dstPrefix, "/") {
-		srcKeyArray := strings.Split(*srcKey, "/")
-		finalKey = *dstPrefix + srcKeyArray[len(srcKeyArray)-1]
+		if strings.EqualFold(*srcPrefix, *srcKey) {
+			srcArray := strings.Split(*srcKey, "/")
+			dstSuffix = srcArray[len(srcArray)-1]
+		} else {
+			dstSuffix = SubString(*srcKey, *srcPrefix)
+		}
+		finalKey = *dstPrefix + dstSuffix
 		return &finalKey
 	} else {
 		return dstPrefix
@@ -182,6 +189,13 @@ func CalculatePartNumber(objectSize *int64, multiPartUploadThreshold *int64) int
 func base64Sum(content []byte) string {
 	sum := md5.Sum(content)
 	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func SubString(s1 string, s2 string) string {
+	if idx := strings.Index(s1, s2); idx != -1 {
+		return s1[idx+len(s2):]
+	}
+	return s1
 }
 
 // completedParts is a wrapper to make parts sortable by their part number,

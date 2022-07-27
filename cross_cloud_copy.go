@@ -108,8 +108,8 @@ func main() {
 				defer wg.Done()
 				concurrentGoroutines <- i
 				copyMetaInfo := &CopyMetaInfo{
-					srcClient, dstClient,
-					obj, srcBucket, desBucket, dstPrefix,
+					srcClient, dstClient, obj,
+					srcBucket, desBucket, srcPrefix, dstPrefix,
 				}
 				copyErr := Retry(maxRetry, 5*time.Second, CopyObject, copyMetaInfo, &multiPartUploadThreshold)
 				if copyErr != nil {
@@ -159,7 +159,7 @@ func CopyObject(copyMetaInfo *CopyMetaInfo, multiPartUploadThreshold *int64) err
 }
 
 func LaunchSimpleUpload(copyMetaInfo *CopyMetaInfo) error {
-	dstKey := GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.dstPrefix)
+	dstKey := GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.srcPrefix, copyMetaInfo.dstPrefix)
 	objectOutput, getObjectErr := copyMetaInfo.srcClient.GetObject(&s3.GetObjectInput{
 		Bucket: copyMetaInfo.srcBucket,
 		Key:    copyMetaInfo.srcObject.Key,
@@ -185,7 +185,7 @@ func LaunchSimpleUpload(copyMetaInfo *CopyMetaInfo) error {
 
 func LaunchMultiPartUpload(copyMetaInfo *CopyMetaInfo, multiPartUploadThreshold *int64) error {
 	totalPartNumber := CalculatePartNumber(copyMetaInfo.srcObject.Size, multiPartUploadThreshold)
-	dstKey := GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.dstPrefix)
+	dstKey := GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.srcPrefix, copyMetaInfo.dstPrefix)
 	uploadOutput, createMultipartUploadErr := copyMetaInfo.dstClient.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
 		Bucket: copyMetaInfo.dstBucket,
 		Key:    dstKey,
@@ -271,7 +271,7 @@ func ReadFromSourceAndWriteToDestination(copyMetaInfo *CopyMetaInfo, uploadId *s
 			UploadId:   uploadId,
 			PartNumber: partNumber,
 			Bucket:     copyMetaInfo.dstBucket,
-			Key:        GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.dstPrefix),
+			Key:        GetDstObjectKey(copyMetaInfo.srcObject.Key, copyMetaInfo.srcPrefix, copyMetaInfo.dstPrefix),
 			Body:       bytes.NewReader(content),
 			ContentMD5: &md5Sum,
 		})
